@@ -17,4 +17,6 @@ print(df.columns)
 
 #print(df['Host Since'].sort_values().tail(1))
 
-print(df[df['Neighbourhood'] == 'Queens']['Zipcode'].value_counts())
+mask = df['Neighbourhood'] == 'Queens'
+df[mask]['Zipcode'].to_csv('output.csv', index=False)
+
