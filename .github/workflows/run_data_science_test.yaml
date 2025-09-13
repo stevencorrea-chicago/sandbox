@@ -29,7 +29,7 @@ jobs:
 
   # Call the reusable workflow
   call-random-data:
-    uses: ./.github/workflows/return-random-data.yml
+    uses: ./.github/workflows/return-random-data.yaml
     secrets: inherit
 
   # Print the output from the reusable workflow
