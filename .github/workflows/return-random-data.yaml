@@ -29,4 +29,6 @@ jobs:
         id: random_data
         run: |
           value=$(python Data_Science/return-random-data.py)
-          echo "value=$value" >> $GITHUB_OUTPUT
+          echo "value<<EOF" >> $GITHUB_OUTPUT
+          echo "$value" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
