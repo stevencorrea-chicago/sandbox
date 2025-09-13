@@ -13,7 +13,7 @@ print(script_path)
 print(parent_dir)
 
 # Recommended way: use `/` to join paths
-file_path = parent_dir.parent/ "mock_airbnb_data_500.xlsx"
+file_path = parent_dir.parent / "mock_airbnb_data_500.xlsx"
 
 df = pd.read_excel(file_path)
 
