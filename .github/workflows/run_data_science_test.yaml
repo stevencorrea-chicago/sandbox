@@ -1,0 +1,42 @@
+name: Run Data Science Test
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  # Your original job
+  run-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pandas openpyxl pathlib
+
+      - name: Run test.py
+        run: python Data_Science/test.py
+
+  # Call the reusable workflow
+  call-random-data:
+    uses: ./.github/workflows/return-random-data.yml
+    secrets: inherit
+
+  # Print the output from the reusable workflow
+  print-output:
+    needs: call-random-data
+    runs-on: ubuntu-latest
+    steps:
+      - name: Print returned data
+        run: |
+          echo "Random data: ${{ needs.call-random-data.outputs.random_data }}"
