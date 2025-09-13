@@ -1,6 +1,6 @@
 import random
 
-# 🎬 Ten iconic movie lines
+# Ten iconic movie lines
 movie_lines = [
     "Frankly, my dear, I don't give a damn. — Gone With the Wind (1939)",
     "I'm going to make him an offer he can't refuse. — The Godfather (1972)",
@@ -14,6 +14,6 @@ movie_lines = [
     "To infinity and beyond! — Toy Story (1995)"
 ]
 
-# 🎲 Randomly select and print one
+# Randomly select and print one
 selected_line = random.choice(movie_lines)
 print(f"Movie Quote of the Moment:\n{selected_line}")
