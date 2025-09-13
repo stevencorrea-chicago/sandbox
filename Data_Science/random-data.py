@@ -16,4 +16,4 @@ movie_lines = [
 
 # 🎲 Randomly select and print one
 selected_line = random.choice(movie_lines)
-print(f"🎥 Movie Quote of the Moment:\n{selected_line}")
+print(f"Movie Quote of the Moment:\n{selected_line}")
