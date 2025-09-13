@@ -28,5 +28,5 @@ jobs:
       - name: Run Python script and capture output
         id: random_data
         run: |
-          value=$(python Data_Science/random-data.py)
+          value=$(python Data_Science/return-random-data.py)
           echo "value=$value" >> $GITHUB_OUTPUT
