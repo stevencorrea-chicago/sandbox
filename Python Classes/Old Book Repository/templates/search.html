@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Book Inventory Search</title>
+    <style>
+        body { font-family: Arial; margin: 40px; }
+        label { width: 80px; display: inline-block; }
+        textarea { width: 100%; height: 250px; margin-top: 20px; }
+        .row { margin-bottom: 10px; }
+    </style>
+</head>
+<body>
+
+<h2>Book Inventory Search</h2>
+
+<form method="POST">
+    <div class="row">
+        <label>Title:</label>
+        <input type="text" name="title">
+    </div>
+
+    <div class="row">
+        <label>Author:</label>
+        <input type="text" name="author">
+    </div>
+
+    <div class="row">
+        <label>Year:</label>
+        <input type="text" name="year">
+    </div>
+
+    <button type="submit">Submit</button>
+
+    <textarea readonly>{{ output }}</textarea>
+</form>
+
+</body>
+</html>
