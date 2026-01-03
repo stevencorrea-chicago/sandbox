@@ -1,6 +1,5 @@
 import sqlite3
-from book_record import BookRecord
-
+from BookRepository.PythonBE.book_record import BookRecord
 
 class BookRepository:
     def __init__(self, db_path="books.db"):

@@ -2,11 +2,11 @@
 from fastapi import FastAPI, Depends, HTTPException
 from typing import List, Optional
 
-from BookRepository..book_record import BookRecord
-from .book_repository import BookRepository
-from .book_service import BookService
-from .config.bookInventory import list_of_books
-from schemas import BookCreate, BookRead
+from BookRepository.PythonBE.book_record import BookRecord
+from BookRepository.PythonBE.book_repository import BookRepository
+from BookRepository.PythonBE.book_service import BookService
+from BookRepository.PythonBE.config.bookInventory import list_of_books
+from BookRepository.FastAPIMiddleware.schemas import BookCreate, BookRead
 from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI(title="Books API")
