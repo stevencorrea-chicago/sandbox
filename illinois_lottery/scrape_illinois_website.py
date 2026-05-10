@@ -9,49 +9,45 @@ import requests
 
 
 class IllinoisLotteryScraper:
-    def __init__(self, html_dir: Path, backup_dir: Path, total_pages: int):
+    def __init__(self, html_dir: Path, backup_dir: Path, total_pages: int, delay_seconds: float = 1.0):
         self.html_dir = html_dir
         self.backup_dir = backup_dir
         self.total_pages = total_pages
+        self.delay_seconds = delay_seconds
         self.scraper: requests.Session = cloudscraper.create_scraper()
 
     def backup_files(self) -> None:
-        """
-        Move all files from html_dir to backup_dir.
-        """
-        if not self.html_dir.exists() or not self.html_dir.is_dir():
-            raise ValueError(f"Source directory does not exist: {self.html_dir}")
+        """Archive any existing HTML files before scraping new pages."""
+        if not self.html_dir.exists():
+            return
 
         self.backup_dir.mkdir(parents=True, exist_ok=True)
-
         moved_count = 0
+
         for item in self.html_dir.iterdir():
             if item.is_file():
-                shutil.move(item, self.backup_dir / item.name)
+                item.rename(self.backup_dir / item.name)
                 moved_count += 1
 
-        print(f"Backup completed: {moved_count} files moved.")
+        if moved_count:
+            print(f"Backup completed: {moved_count} files moved.")
 
     def scrape_pages(self) -> None:
-        """
-        Scrape total_pages from the Illinois Lottery website and save HTML locally.
-        """
+        """Scrape lottery pages and persist raw HTML files."""
         self.html_dir.mkdir(parents=True, exist_ok=True)
 
-        for page in range(self.total_pages):
-            url = f'https://www.illinoislottery.com/dbg/results/luckydaylotto?page={page+1}'
-            response = self.scraper.get(url)
-            soup = BeautifulSoup(response.text, 'html.parser')
+        for page in range(1, self.total_pages + 1):
+            url = f"https://www.illinoislottery.com/dbg/results/luckydaylotto?page={page}"
+            response = self.scraper.get(url, timeout=30)
+            response.raise_for_status()
 
-            page_file = self.html_dir / f"{page+1}.html"
-            with open(page_file, "w", encoding="utf-8") as f:
-                for element in soup.contents:
-                    f.write(str(element))
+            page_file = self.html_dir / f"{page}.html"
+            page_file.write_text(response.text, encoding="utf-8")
 
-            time.sleep(1)
+            if page % 100 == 0:
+                print(f"Scraped page {page}/{self.total_pages}")
 
-            if page % 100 == 0 and page > 0 :
-                print(f"Scraped page {page+1}/{self.total_pages}")
+            time.sleep(self.delay_seconds)
 
     def run(self):
         """

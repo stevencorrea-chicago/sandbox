@@ -1,5 +1,3 @@
-# process_html.py
-
 from bs4 import BeautifulSoup
 from datetime import datetime
 from pathlib import Path
@@ -7,146 +5,259 @@ import pandas as pd
 import shutil
 
 
-class HtmlProcessor:
+class LotteryDataETL:
+    EXPECTED_COLUMNS = [
+        "draw_id",
+        "draw_date",
+        "year",
+        "month",
+        "day",
+        "dow",
+        "num1",
+        "num2",
+        "num3",
+        "num4",
+        "num5",
+        "num_sum",
+        "even_count",
+        "odd_count",
+        "consecutive_count",
+        "source_file",
+        "scrape_timestamp",
+    ]
+
+    NUMBER_COLUMNS = ["num1", "num2", "num3", "num4", "num5"]
+
     def __init__(self, html_folder: Path, output_folder: Path, baseline_file: Path, print_enabled: bool = False):
         self.html_folder = html_folder
         self.output_folder = output_folder
         self.baseline_file = baseline_file
         self.enabled = print_enabled
 
-        # Generate timestamped output file paths
-        self.output_file_with_date = output_folder / f"{self.fetch_timestamp()}_with_date.csv"
-        self.output_file_without_date = output_folder / f"{self.fetch_timestamp()}_without_date.csv"
-        self.error_file = output_folder / f"errors_{self.fetch_timestamp()}.csv"
-
         self.output_folder.mkdir(parents=True, exist_ok=True)
 
-        expected_cols = ["dow", "date", "num1", "num2", "num3", "num4", "num5"]
+        self.output_file = self.output_folder / "lottery_draws.csv"
+        self.output_file_numbers = self.output_folder / "lottery_draws_numbers.csv"
+        self.error_file = self.output_folder / f"errors_{self.fetch_timestamp()}.log"
 
-        # Load baseline if it exists, otherwise initialize empty
-        if baseline_file.exists():
-            self.baseline_df = pd.read_csv(baseline_file, index_col=False)
+        if self.baseline_file.exists():
+            baseline_df = pd.read_csv(self.baseline_file, dtype=str)
+            self.baseline_df = self._normalize_baseline_df(baseline_df)
         else:
-            self.baseline_df = pd.DataFrame(columns=expected_cols)
+            self.baseline_df = pd.DataFrame(columns=self.EXPECTED_COLUMNS)
 
+    def _normalize_baseline_df(self, df: pd.DataFrame) -> pd.DataFrame:
+        if "draw_date" not in df.columns and "date" in df.columns:
+            df = df.rename(columns={"date": "draw_date"})
 
-    @staticmethod
-    def fetch_numerical_month(month: str) -> str:
-        month_dict = {
-            'JAN': '01', 'FEB': '02', 'MAR': '03', 'APR': '04', 'MAY': '05', 'JUN': '06',
-            'JUL': '07', 'AUG': '08', 'SEP': '09', 'OCT': '10', 'NOV': '11', 'DEC': '12'
-        }
-        return month_dict.get(month.upper(), '00')
-    
+        if "draw_date" not in df.columns:
+            raise ValueError("Baseline file must contain either 'draw_date' or 'date' column.")
+
+        df["draw_date"] = df["draw_date"].astype(str).str.strip()
+        df["draw_date"] = pd.to_datetime(
+            df["draw_date"],
+            format="%Y%m%d",
+            errors="coerce",
+        )
+
+        if df["draw_date"].isna().any():
+            df["draw_date"] = pd.to_datetime(df["draw_date"].astype(str), errors="coerce")
+
+        if df["draw_date"].isna().any():
+            raise ValueError("Baseline file contains unparseable draw dates.")
+
+        if "draw_id" not in df.columns:
+            df["draw_id"] = (
+                df.groupby(df["draw_date"].dt.date).cumcount().add(1).astype(str).str.zfill(2)
+            )
+            df["draw_id"] = df["draw_date"].dt.strftime("%Y%m%d") + "-" + df["draw_id"]
+
+        if "year" not in df.columns:
+            df["year"] = df["draw_date"].dt.year
+        if "month" not in df.columns:
+            df["month"] = df["draw_date"].dt.month
+        if "day" not in df.columns:
+            df["day"] = df["draw_date"].dt.day
+
+        df["draw_date"] = df["draw_date"].dt.date.astype(str)
+
+        if "dow" in df.columns:
+            df["dow"] = df["dow"].astype(str)
+
+        for col in self.NUMBER_COLUMNS:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors="coerce").astype(int)
+            else:
+                df[col] = pd.NA
+
+        df["num_sum"] = df[self.NUMBER_COLUMNS].sum(axis=1)
+        df["even_count"] = df[self.NUMBER_COLUMNS].apply(lambda row: sum(int(n) % 2 == 0 for n in row), axis=1)
+        df["odd_count"] = df[self.NUMBER_COLUMNS].apply(lambda row: sum(int(n) % 2 != 0 for n in row), axis=1)
+        df["consecutive_count"] = df[self.NUMBER_COLUMNS].apply(lambda row: self.consecutive_run_count([int(n) for n in row]), axis=1)
+
+        if "source_file" not in df.columns:
+            df["source_file"] = self.baseline_file.name
+        if "scrape_timestamp" not in df.columns:
+            df["scrape_timestamp"] = self.fetch_timestamp()
+
+        df = df.reindex(columns=self.EXPECTED_COLUMNS)
+        df = df.astype({
+            "num1": int,
+            "num2": int,
+            "num3": int,
+            "num4": int,
+            "num5": int,
+            "year": int,
+            "month": int,
+            "day": int,
+            "num_sum": int,
+            "even_count": int,
+            "odd_count": int,
+            "consecutive_count": int,
+        })
+        return df
+
     @staticmethod
     def fetch_timestamp() -> str:
         return datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    def print_data(self, data: str):
+    @staticmethod
+    def parse_draw_date(raw_date: str) -> datetime | None:
+        normalized = raw_date.strip().replace(",", "")
+        try:
+            return datetime.strptime(normalized.title(), "%b %d %Y")
+        except ValueError:
+            try:
+                return datetime.strptime(normalized, "%B %d %Y")
+            except ValueError:
+                return None
+
+    @staticmethod
+    def consecutive_run_count(numbers: list[int]) -> int:
+        numbers = sorted(numbers)
+        longest = 1
+        current = 1
+        for index in range(1, len(numbers)):
+            if numbers[index] == numbers[index - 1] + 1:
+                current += 1
+                longest = max(longest, current)
+            else:
+                current = 1
+        return longest
+
+    def print_data(self, message: str) -> None:
         if self.enabled:
-            print(data)
+            print(message)
 
     def process_file(self, file_path: Path) -> list[dict]:
-        """
-        Extract lotto results from a single HTML file.
-        Returns a list of dict records: {dow, date, num1..num5}
-        """
         records = []
-        try:
-            with file_path.open('r', encoding='utf-8') as f:
-                html_page = f.read()
 
+        try:
+            html_page = file_path.read_text(encoding="utf-8")
             soup = BeautifulSoup(html_page, "html.parser")
 
-            for day_sequence in range(1, 11):  # check 10 results per page
-                try:
-                    dow = soup.find("span", attrs={"data-test-id": f"draw-result-info-day-{day_sequence}"}).get_text(strip=True)
-                    date = soup.find("span", attrs={"data-test-id": f"draw-result-info-date-{day_sequence}"}).get_text(strip=True)
+            for day_sequence in range(1, 11):
+                dow_tag = soup.find("span", attrs={"data-test-id": f"draw-result-info-day-{day_sequence}"})
+                date_tag = soup.find("span", attrs={"data-test-id": f"draw-result-info-date-{day_sequence}"})
 
-                    month_str, day_str, year = date.replace(",", "").split()
-                    month = self.fetch_numerical_month(month_str)
-                    day = day_str.zfill(2)
-                    new_date = f"{year}{month}{day}"
+                if not dow_tag or not date_tag:
+                    continue
 
-                    self.print_data(f"{dow}, {new_date}")
+                draw_date = self.parse_draw_date(date_tag.get_text(strip=True))
+                if not draw_date:
+                    self.print_data(f"Unable to parse date in {file_path.name}: {date_tag.get_text(strip=True)}")
+                    continue
 
-                    numbers = []
-                    for lotto_num in range(5):
-                        div = soup.find("div", id=f"result-line-primary-{lotto_num}-{day_sequence}")
-                        if div:
-                            numbers.append(div.get_text(strip=True))
+                numbers = []
+                for lotto_num in range(5):
+                    div = soup.find("div", id=f"result-line-primary-{lotto_num}-{day_sequence}")
+                    if div and div.get_text(strip=True).isdigit():
+                        numbers.append(int(div.get_text(strip=True)))
 
-                    if len(numbers) == 5:
-                        record = {
-                            "dow": dow[:3],
-                            "date": new_date,
-                            "num1": numbers[0],
-                            "num2": numbers[1],
-                            "num3": numbers[2],
-                            "num4": numbers[3],
-                            "num5": numbers[4]
-                        }
-                        records.append(record)
+                if len(numbers) != 5:
+                    continue
 
-                except Exception:
-                    continue  # Skip malformed sequence
+                numbers = sorted(numbers)
+                record = {
+                    "draw_id": f"{draw_date.strftime('%Y%m%d')}-{day_sequence:02d}",
+                    "draw_date": draw_date.date().isoformat(),
+                    "year": draw_date.year,
+                    "month": draw_date.month,
+                    "day": draw_date.day,
+                    "dow": dow_tag.get_text(strip=True),
+                    "num1": numbers[0],
+                    "num2": numbers[1],
+                    "num3": numbers[2],
+                    "num4": numbers[3],
+                    "num5": numbers[4],
+                    "num_sum": sum(numbers),
+                    "even_count": sum(1 for n in numbers if n % 2 == 0),
+                    "odd_count": sum(1 for n in numbers if n % 2 != 0),
+                    "consecutive_count": self.consecutive_run_count(numbers),
+                    "source_file": file_path.name,
+                    "scrape_timestamp": self.fetch_timestamp(),
+                }
+                records.append(record)
 
-        except Exception as e:
-            self.print_data(f"Error reading {file_path}: {e}")
+        except Exception as exc:
+            self.print_data(f"Error processing {file_path.name}: {exc}")
 
-        
         return records
 
-    def process_all_files(self):
-        """
-        Process all HTML files, compare with baseline, and output new records only.
-        """
-        files = sorted([f for f in self.html_folder.iterdir() if f.is_file() and f.suffix == '.html'])
+    def process_all_files(self) -> pd.DataFrame:
+        files = sorted([path for path in self.html_folder.iterdir() if path.is_file() and path.suffix == ".html"])
         new_records = []
 
-        for file in files:
-            new_records.extend(self.process_file(file))
+        for html_file in files:
+            new_records.extend(self.process_file(html_file))
 
-        # Convert to DataFrame
+        if not new_records:
+            self.print_data("No new records were extracted from HTML files.")
+            return pd.DataFrame(columns=self.EXPECTED_COLUMNS)
+
         new_df = pd.DataFrame(new_records)
-        
-        if not new_df.empty:
-            expected_cols = ["dow", "date", "num1", "num2", "num3", "num4", "num5"]
+        new_df = new_df.astype({
+            "num1": int,
+            "num2": int,
+            "num3": int,
+            "num4": int,
+            "num5": int,
+            "year": int,
+            "month": int,
+            "day": int,
+            "num_sum": int,
+            "even_count": int,
+            "odd_count": int,
+            "consecutive_count": int,
+        })
 
-            # Normalize new data
-            new_df = new_df.reindex(columns=expected_cols).fillna("").astype(str)
-            
-            # Combine with baseline and remove duplicates
-            combined = pd.concat([self.baseline_df, new_df], ignore_index=True)
-            combined = combined.drop_duplicates(subset=expected_cols)
-            
-            # Sort & normalize combined for consistency
-            combined = combined.reindex(columns=expected_cols).fillna("").astype(str)
-            combined = combined.sort_values(by="date")
-            
-            # Write outputs
-            combined.to_csv(self.output_file_with_date, index=False)
-            combined.drop(columns=["dow", "date"]).to_csv(
-                self.output_file_without_date,
-                index=False,
-                header=False
-            )
-            destination_path = self.baseline_file.parent / f"baseline_backup_{self.fetch_timestamp()}.csv"
+        combined = pd.concat([self.baseline_df, new_df], ignore_index=True, sort=False)
+        combined = combined.drop_duplicates(subset=["draw_date", "num1", "num2", "num3", "num4", "num5"])
+        combined = combined.reindex(columns=self.EXPECTED_COLUMNS)
+        combined = combined.sort_values(by=["draw_date", "draw_id"]).reset_index(drop=True)
 
-            if self.baseline_file.exists():
-                shutil.copy2(self.baseline_file, destination_path)
-                self.baseline_file.unlink()
-                combined.to_csv(self.baseline_file, index=False)
+        self.write_outputs(combined)
+        return combined
+
+    def write_outputs(self, combined: pd.DataFrame) -> None:
+        combined.to_csv(self.output_file, index=False)
+        combined[self.NUMBER_COLUMNS].to_csv(self.output_file_numbers, index=False, header=True)
+
+        if self.baseline_file.exists():
+            backup_file = self.baseline_file.parent / f"baseline_backup_{self.fetch_timestamp()}.csv"
+            shutil.copy2(self.baseline_file, backup_file)
+
+        self.baseline_file.parent.mkdir(parents=True, exist_ok=True)
+        combined.to_csv(self.baseline_file, index=False)
 
 
 if __name__ == "__main__":
-    # Get the absolute path to the current script
     script_path = Path(__file__).resolve()
     root_path = script_path.parent
 
-    html_folder = Path(root_path, "html_pages")
-    output_folder = Path(root_path, "output")
-    baseline_file = Path(root_path, "input/baseline.csv")
+    html_folder = root_path / "html_pages"
+    output_folder = root_path / "output"
+    baseline_file = root_path / "input" / "baseline.csv"
 
-    processor = HtmlProcessor(html_folder, output_folder, baseline_file, print_enabled=False)
+    processor = LotteryDataETL(html_folder, output_folder, baseline_file, print_enabled=False)
     processor.process_all_files()

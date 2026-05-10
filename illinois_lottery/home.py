@@ -1,8 +1,10 @@
+from pathlib import Path
+import datetime
+import os
+
 from scrape_illinois_website import IllinoisLotteryScraper
 from create_number_pool import NumberPoolGenerator
-from extract_nums import HtmlProcessor
-from pathlib import Path
-import datetime, os
+from extract_nums import LotteryDataETL
 
 def get_current_date() -> str:
     now = datetime.datetime.now()
@@ -12,66 +14,69 @@ def log_generated_numbers(generator: NumberPoolGenerator, generated_nums: Path, 
     with open(generated_nums, mode, encoding="utf-8") as f:
         for _ in range(5):
             new_combo = generator.generate_filtered_combination()
-            latest_file = NumberPoolGenerator.determine_latest_csv_file(output_folder)
-            df = generator.load_historical_draws(latest_file)
+            df = generator.load_historical_draws()
             result = generator.contains_tuple(df, new_combo)
             date_time_string = f"Numbers generated on {get_current_date()}: "
             if result:
-                print(f"{date_time_string} {new_combo} (Generated combination already exists in historical draws!)")
-                f.write(f"{date_time_string} {new_combo} (Generated combination already exists in historical draws!)\n")
+                print(f"{date_time_string}{new_combo} (already exists)")
+                f.write(f"{date_time_string}{new_combo} (already exists)\n")
             else:
-                print(f"{date_time_string} {new_combo}")
-                f.write(f"{date_time_string} {new_combo}\n")
-                    
-        
+                print(f"{date_time_string}{new_combo}")
+                f.write(f"{date_time_string}{new_combo}\n")
 
-def menu():
-    print ("Make a selection:")
+
+def prompt_page_count() -> int:
+    user_input = input("How many pages should I scrape? ")
+    return int(user_input) if user_input.isdigit() and int(user_input) > 0 else 1
+
+
+def menu() -> str:
+    print("Make a selection:")
     print("\t1. Scrape Illinois Lottery Website")
-    print("\t2. Generate numbers")
-    print("\t3. All of the above")
+    print("\t2. Generate numbers from latest dataset")
+    print("\t3. Scrape + ETL + Generate")
     print("\t4. Exit")
 
-    user_selection = input("Selection: ")
-
-    if not user_selection in ['1', '2', '3', '4']:
-        print ("Invalid selection.")
-        menu()
-
-    if user_selection == '4':
+    selection = input("Selection: ").strip()
+    if selection not in {"1", "2", "3", "4"}:
+        print("Invalid selection.")
+        return menu()
+    if selection == "4":
         exit()
+    return selection
 
-    return user_selection
+def ensure_directories(paths: list[Path]) -> None:
+    for path in paths:
+        path.mkdir(parents=True, exist_ok=True)
+
 
 if __name__ == "__main__":
     script_path = Path(__file__).resolve()
     root_path = script_path.parent
+
     html_folder = Path(root_path, "html_pages")
+    backup_dir = Path(root_path, "html_pages_backup")
     output_folder = Path(root_path, "output")
     baseline_file = Path(root_path, "input/baseline.csv")
-    html_dir = Path(root_path, "html_pages")
-    backup_dir = Path(root_path, "html_pages_backup")
-    generated_nums = Path(root_path, "output/generated_nums.csv")
+    generated_nums = output_folder / "generated_nums.csv"
 
-    menu_selction = menu()
+    ensure_directories([html_folder, backup_dir, output_folder, baseline_file.parent])
 
-    if menu_selction != '4':
-        user_selection = input("How many pages should I scrape? ")
-        total_pages = int(user_selection) if user_selection.isdigit() else 1
+    choice = menu()
+    should_scrape = choice in {"1", "3"}
+    should_generate = choice in {"2", "3"}
 
-        # Scrape Illinois Lottery website
-        scraper_obj = IllinoisLotteryScraper(html_dir, backup_dir, total_pages)
+    if should_scrape:
+        total_pages = prompt_page_count()
+        scraper_obj = IllinoisLotteryScraper(html_folder, backup_dir, total_pages)
         scraper_obj.run()
 
-    if menu_selction == '2' or menu_selction == '3':
-        # Process HTML files and extract values from webpages
-        processor = processor = HtmlProcessor(html_folder, output_folder, baseline_file, print_enabled=False)
+    if choice == "3":
+        processor = LotteryDataETL(html_folder, output_folder, baseline_file, print_enabled=False)
         processor.process_all_files()
 
-        # Generate number pool
-        generator = NumberPoolGenerator(processor.output_file_without_date)
-
-        if not os.path.exists(generated_nums):
-            log_generated_numbers(generator, generated_nums, "w")
-        else:
-            log_generated_numbers(generator, generated_nums, "a")
+    if should_generate:
+        latest_file = NumberPoolGenerator.determine_latest_csv_file(output_folder)
+        generator = NumberPoolGenerator(latest_file)
+        mode = "a" if generated_nums.exists() else "w"
+        log_generated_numbers(generator, generated_nums, mode)
